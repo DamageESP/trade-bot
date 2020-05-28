@@ -5,6 +5,8 @@
   "main": "index.js",
   "dependencies": {
     "chalk": "^4.0.0",
+    "chart.js": "^2.9.3",
+    "chartjs-node-canvas": "^3.0.6",
     "coinmarketcap-api": "^3.1.0",
     "dotenv": "^8.2.0",
     "ts-node": "^8.10.1",
