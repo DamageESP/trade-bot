@@ -1,110 +1,76 @@
 require('dotenv').config()
 const chalk = require('chalk')
-import * as fs from 'fs'
-import { resolve as resolvePath } from 'path'
 
 import { getNextPrice } from './datasources/historic'
 import { timeStamp } from './lib/util'
-import { PriceData } from './lib/types'
+import { PriceData, TradeBotData, Decision } from './lib/types'
+import { calculateNextMove } from './algorithms/macd'
+import { renderGraph } from './lib/chart'
 
-const prices: Array<PriceData> = []
-const initialPortfolioValue = 1000
-const diffs: Array<number> = []
-const buyingSpots: Array<number|null> = []
-const sellingSpots: Array<number|null> = []
-
-let boughtAt: number = 0
-let portfolioValue: number = initialPortfolioValue // We start with a thousand dollars
+const botData: TradeBotData = {
+  currentPosition: null,
+  buyingSpots: [],
+  sellingSpots: [],
+  diffs: [],
+  initialPortfolioValue: 1000,
+  positions: [],
+  prices: [],
+  portfolioValue: 1000
+}
 
 const takeAction = async () => {
-    const newPrice: PriceData = await getNextPrice()
-    if (typeof newPrice === 'undefined') {
-        console.log(chalk.bgRed.yellow(`${timeStamp()} Initial portfolio value: ${initialPortfolioValue}`))
-        console.log(chalk.bgRed.yellow(`${timeStamp()} Final portfolio value: ${initialPortfolioValue + diffs.reduce((acc, cur) => acc + cur, 0)}`))
-        console.log(chalk.bgRed.yellow(`${timeStamp()} Portfolio value change: ${((portfolioValue / initialPortfolioValue - 1) * 100).toFixed(2)}%`))
-        await renderGraph(prices)
-        return
-    }    
-    prices.push(newPrice)
-    console.log(chalk.blue(`${timeStamp()} Latest price is ${newPrice.price}`))
-    const amountOfData = prices.length
-    // we dont have enough information to take action
-    if (amountOfData < 5) {
-        console.log(`${timeStamp()} Not enough information (only have ${amountOfData} price(s))`)
-        buyingSpots.push(null)
-        sellingSpots.push(null)
-        takeAction()
-        return
-    }
-    const slope = prices[prices.length - 1].price / prices[prices.length - 2].price - 1
-    const prevSlope = prices[prices.length - 2].price / prices[prices.length - 3].price - 1
-    if (slope >= 0 && prevSlope < 0 && !boughtAt) {
-        // buy
-        console.log(chalk.bgBlue.bold.white(`${timeStamp()} Buying at ${prices[prices.length - 1].price}`))
-        boughtAt = prices[prices.length - 1].price
-        buyingSpots.push(Math.round(prices[prices.length - 1].price))
-        sellingSpots.push(null)
-    } else if (slope <= 0 && prevSlope > 0 && boughtAt) {
-        // sell
-        console.log(chalk.bgGreen.bold.white(`${timeStamp()} Selling at ${prices[prices.length - 1].price}`))
-        const relativeChange = prices[prices.length - 1].price / boughtAt
-        const newPortfolioValue = portfolioValue * relativeChange
-        diffs.push(newPortfolioValue - portfolioValue)
-        portfolioValue = newPortfolioValue
-        boughtAt = 0
-        sellingSpots.push(Math.round(prices[prices.length - 1].price))
-        buyingSpots.push(null)
-    } else {
-        // No action needed
-        buyingSpots.push(null)
-        sellingSpots.push(null)
-        console.log(`${timeStamp()} No action needed`)
-    }
-    const curBalance = diffs.reduce((acc, cur) => acc + cur, 0)
-    console.log(chalk.green(`${timeStamp()} Current balance is: ${curBalance}`))
-    console.log(chalk.green(`${timeStamp()} Current portfolio value is: ${portfolioValue}`))
+  const newPrice: PriceData = await getNextPrice()
+  if (typeof newPrice === 'undefined') {
+    console.log(chalk.bgRed.yellow(`${timeStamp()} Initial portfolio value: ${botData.initialPortfolioValue}`))
+    console.log(chalk.bgRed.yellow(`${timeStamp()} Final portfolio value: ${botData.initialPortfolioValue + botData.diffs.reduce((acc, cur) => acc + cur, 0)}`))
+    console.log(chalk.bgRed.yellow(`${timeStamp()} Portfolio value change: ${((botData.portfolioValue / botData.initialPortfolioValue - 1) * 100).toFixed(2)}%`))
+    await renderGraph(botData)
+    return
+  }    
+  botData.prices.push(newPrice)
+  console.log(chalk.blue(`${timeStamp()} Latest price is ${newPrice.price}`))
+  const amountOfData = botData.prices.length
+  // we dont have enough information to take action
+  if (amountOfData < 5) {
+    console.log(`${timeStamp()} Not enough information (only have ${amountOfData} price(s))`)
+    botData.buyingSpots.push(null)
+    botData.sellingSpots.push(null)
     takeAction()
+    return
+  }
+  const decision: Decision = calculateNextMove(botData)
+  if (decision === Decision.BUY) {
+    // buy
+    botData.currentPosition = {
+      entry: newPrice,
+      exit: null
+    }
+    console.log(chalk.bgBlue.bold.white(`${timeStamp()} Buying at ${newPrice.price}`))
+    botData.buyingSpots.push(Math.round(botData.prices[amountOfData - 1].price))
+    botData.sellingSpots.push(null)
+  } else if (decision === Decision.SELL) {
+    // sell
+    botData.currentPosition.exit = newPrice
+    botData.positions.push(botData.currentPosition)
+    console.log(chalk.bgGreen.bold.white(`${timeStamp()} Selling at ${newPrice.price}`))
+    const relativeChange = newPrice.price / botData.currentPosition.entry.price
+    const newPortfolioValue = botData.portfolioValue * relativeChange
+    botData.diffs.push(newPortfolioValue - botData.portfolioValue)
+    botData.portfolioValue = newPortfolioValue
+    botData.currentPosition = null
+    botData.sellingSpots.push(Math.round(newPrice.price))
+    botData.buyingSpots.push(null)
+    botData.currentPosition = null
+  } else {
+    // No action needed
+    botData.buyingSpots.push(null)
+    botData.sellingSpots.push(null)
+    console.log(`${timeStamp()} No action needed`)
+  }
+  const curBalance = botData.diffs.reduce((acc, cur) => acc + cur, 0)
+  console.log(chalk.green(`${timeStamp()} Current balance is: ${curBalance}`))
+  console.log(chalk.green(`${timeStamp()} Current portfolio value is: ${botData.portfolioValue}`))
+  takeAction()
 }
 
 takeAction()
-
-const { CanvasRenderService } = require('chartjs-node-canvas');
-
-const width = 1500;
-const height = 500;
-const canvasRenderService = new CanvasRenderService(width, height);
-
-const renderGraph = async (data: Array<PriceData>) => {
-    const mappedData = data.map(priceData => Math.round(priceData.price))
-    const mappedLabels = data.map(priceData => timeStamp(priceData.date))
-    
-    const configuration = {
-        type: 'line',
-        data: {
-            labels: mappedLabels,
-            datasets: [{
-                label: 'BTCUSD',
-                data: mappedData,
-                borderColor: '#FF0000'
-            },
-            {
-                label: 'buying points',
-                data: buyingSpots,
-                borderColor: '#0000FF',
-                showLine: false,
-                borderWidth: 10,
-            },
-            {
-                label: 'selling points',
-                data: sellingSpots,
-                borderColor: '#00FF00',
-                showLine: false,
-                borderWidth: 10,
-            }]
-        },
-    }
-
-    const image = await canvasRenderService.renderToBuffer(configuration)
-
-    fs.writeFileSync(resolvePath(__dirname, '../charts/mychart.png'), image)
-}

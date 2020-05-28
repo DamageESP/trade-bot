@@ -1,20 +1,34 @@
 export interface PriceData {
-    price: number,
-    date: number
+  price: number,
+  date: number
 }
 
-export interface Position extends PriceData {
-    shorted: boolean
+export interface Position {
+  entry: PriceData,
+  exit: PriceData,
 }
 
-export interface PortfolioData {
-    positions: Array<PriceData>,
-    buyingSpots: Array<number | null>,
-    sellingSpots: Array<number | null>,
+export interface TradeBotData {
+  currentPosition: Position | null,
+  initialPortfolioValue: number,
+  portfolioValue: number,
+  diffs: Array<number>,
+  prices: Array<PriceData>,
+  positions: Array<Position>,
+  buyingSpots: Array<number | null>,
+  sellingSpots: Array<number | null>,
 }
 
-export enum AlgorithmActions {
-    HOLD = 'hodl',
-    BUY = 'buy',
-    SELL = 'sell',
+export enum Decision {
+  HOLD = 'hodl',
+  BUY = 'buy',
+  SELL = 'sell',
+}
+
+export interface ChartDataset {
+  label: string,
+  data: Array<number>,
+  borderColor?: string,
+  showLine?: boolean,
+  borderWidth?: number,
 }
